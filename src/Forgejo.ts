@@ -22,9 +22,23 @@ export class ForgejoClient {
         });
     }
 
-    async ensureOwner(name: string, type: OwnerType, metadata: GithubUser | GithubOrg | null): Promise<"created" | "skipped"> {
+    async ensureOwner(name: string, type: OwnerType, metadata: GithubUser | GithubOrg | null, alreadyExists: boolean): Promise<"created" | "skipped"> {
+        if (alreadyExists) {
+            if (metadata) await this.syncOwnerMetadata(name, type, metadata);
+            return "skipped";
+        }
+
         if (type === "organization") return this.ensureOrg(name, metadata as GithubOrg | null);
         return this.ensureUser(name, metadata as GithubUser | null);
+    }
+
+    async syncOwnerMetadata(name: string, type: OwnerType, metadata: GithubUser | GithubOrg): Promise<void> {
+        if (type === "organization") {
+            await this.syncOrgMetadata(name, metadata as GithubOrg);
+            return;
+        }
+
+        await this.syncUserMetadata(name, metadata as GithubUser);
     }
 
     async ensureRepo(owner: string, repo: string, type: OwnerType): Promise<"created" | "skipped"> {

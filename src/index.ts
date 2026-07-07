@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { readdir } from "node:fs/promises";
+import { readFile, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import readline from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
@@ -25,6 +25,7 @@ interface Summary {
 }
 
 const setupMode = process.argv.includes("--setup");
+const setupPath = path.resolve("sync-forgejo.setup.json");
 const forgejo = new ForgejoClient(
     config.forgejoUrl,
     config.forgejoToken,
@@ -53,7 +54,7 @@ async function main(): Promise<void> {
             return;
         }
 
-        const setups = setupMode ? await promptSetup(owners) : defaultSetup(owners);
+        const setups = setupMode ? await promptSetup(owners) : await loadSetup(owners);
 
         for (const owner of owners) {
             await processOwner(owner, setups.get(owner.name)!, summary);
@@ -99,12 +100,16 @@ async function promptSetup(owners: LocalOwner[]): Promise<Map<string, OwnerSetup
         for (const owner of owners) {
             console.log(chalk.bold(`\n${owner.name}`));
             const type = await promptOwnerType(rl);
+            const alreadyExists = await promptYesNo(rl, "Already exists in Forgejo? (y/n) ");
             const githubIntegration = await promptYesNo(rl, "GitHub integration? (y/n) ");
-            setups.set(owner.name, { type, githubIntegration });
+            setups.set(owner.name, { type, alreadyExists, githubIntegration });
         }
     } finally {
         rl.close();
     }
+
+    await saveSetup(setups);
+    console.log(chalk.green(`Saved setup to ${setupPath}`));
 
     return setups;
 }
@@ -127,8 +132,42 @@ async function promptYesNo(rl: readline.Interface, question: string): Promise<bo
     }
 }
 
+async function loadSetup(owners: LocalOwner[]): Promise<Map<string, OwnerSetup>> {
+    try {
+        const raw = await readFile(setupPath, "utf8");
+        const parsed = JSON.parse(raw) as Record<string, Partial<OwnerSetup>>;
+        const setups = new Map<string, OwnerSetup>();
+
+        for (const owner of owners) {
+            const setup = parsed[owner.name];
+            if (!setup) {
+                setups.set(owner.name, { type: "user", alreadyExists: false, githubIntegration: false });
+                continue;
+            }
+
+            setups.set(owner.name, {
+                type: setup.type === "organization" ? "organization" : "user",
+                alreadyExists: setup.alreadyExists === true,
+                githubIntegration: setup.githubIntegration === true,
+            });
+        }
+
+        return setups;
+    } catch (err: any) {
+        if (err?.code !== "ENOENT") throw err;
+
+        console.log(chalk.yellow(`No ${path.basename(setupPath)} found; defaulting all folders to new users without GitHub integration.`));
+        return defaultSetup(owners);
+    }
+}
+
+async function saveSetup(setups: Map<string, OwnerSetup>): Promise<void> {
+    const output = Object.fromEntries([...setups.entries()].sort(([a], [b]) => a.localeCompare(b)));
+    await writeFile(setupPath, `${JSON.stringify(output, null, 4)}\n`);
+}
+
 function defaultSetup(owners: LocalOwner[]): Map<string, OwnerSetup> {
-    return new Map(owners.map((owner) => [owner.name, { type: "user", githubIntegration: false }]));
+    return new Map(owners.map((owner) => [owner.name, { type: "user", alreadyExists: false, githubIntegration: false }]));
 }
 
 async function processOwner(owner: LocalOwner, setup: OwnerSetup, summary: Summary): Promise<void> {
@@ -136,7 +175,7 @@ async function processOwner(owner: LocalOwner, setup: OwnerSetup, summary: Summa
 
     try {
         const metadata = setup.githubIntegration ? await getGithubMetadata(owner.name, setup.type) : null;
-        const ownerStatus = await forgejo.ensureOwner(owner.name, setup.type, metadata);
+        const ownerStatus = await forgejo.ensureOwner(owner.name, setup.type, metadata, setup.alreadyExists);
 
         if (ownerStatus === "created") {
             summary.ownersCreated++;

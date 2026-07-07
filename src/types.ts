@@ -42,6 +42,7 @@ export interface GithubRepo {
 export interface OwnerSetup {
     type: OwnerType;
     githubIntegration: boolean;
+    alreadyExists: boolean;
 }
 
 export interface LocalRepo {
