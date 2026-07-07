@@ -19,6 +19,7 @@ interface Summary {
     ownersCreated: number;
     ownersSkipped: number;
     reposCreated: number;
+    reposAdopted: number;
     reposSkipped: number;
     reposPushed: number;
     errors: number;
@@ -40,6 +41,7 @@ async function main(): Promise<void> {
         ownersCreated: 0,
         ownersSkipped: 0,
         reposCreated: 0,
+        reposAdopted: 0,
         reposSkipped: 0,
         reposPushed: 0,
         errors: 0,
@@ -62,7 +64,7 @@ async function main(): Promise<void> {
 
         console.log(chalk.bold.green("Sync completed"));
         console.log(`Owners: ${chalk.green(summary.ownersCreated)} created, ${chalk.yellow(summary.ownersSkipped)} skipped`);
-        console.log(`Repos: ${chalk.green(summary.reposCreated)} created, ${chalk.yellow(summary.reposSkipped)} skipped, ${chalk.blue(summary.reposPushed)} pushed`);
+        console.log(`Repos: ${chalk.green(summary.reposCreated)} created, ${chalk.cyan(summary.reposAdopted)} adopted, ${chalk.yellow(summary.reposSkipped)} skipped, ${chalk.blue(summary.reposPushed)} pushed`);
         if (summary.errors > 0) console.log(chalk.red(`Errors: ${summary.errors}`));
     } catch (err: any) {
         spinner.fail(chalk.red(err?.message || String(err)));
@@ -212,6 +214,12 @@ async function processRepo(owner: string, repo: LocalRepo, type: OwnerType, summ
         if (repoStatus === "skipped") {
             summary.reposSkipped++;
             spinner.info(chalk.yellow(`Skipped existing repo ${owner}/${repo.name}`));
+            return;
+        }
+
+        if (repoStatus === "adopted") {
+            summary.reposAdopted++;
+            spinner.succeed(chalk.cyan(`Adopted existing repo files ${owner}/${repo.name}`));
             return;
         }
 

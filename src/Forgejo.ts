@@ -41,7 +41,7 @@ export class ForgejoClient {
         await this.syncUserMetadata(name, metadata as GithubUser);
     }
 
-    async ensureRepo(owner: string, repo: string, type: OwnerType): Promise<"created" | "skipped"> {
+    async ensureRepo(owner: string, repo: string, type: OwnerType): Promise<"created" | "skipped" | "adopted"> {
         try {
             await this.api.get(`/repos/${owner}/${repo}`);
             return "skipped";
@@ -56,10 +56,23 @@ export class ForgejoClient {
                 private: true,
             });
         } catch (err) {
+            if (this.isExistingRepositoryFilesError(err)) {
+                await this.adoptRepo(owner, repo);
+                return "adopted";
+            }
+
             throw this.toError(err, `failed to create repo ${owner}/${repo}`);
         }
 
         return "created";
+    }
+
+    private async adoptRepo(owner: string, repo: string): Promise<void> {
+        try {
+            await this.api.post(`/admin/unadopted/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`);
+        } catch (err) {
+            throw this.toError(err, `failed to adopt existing repo files for ${owner}/${repo}`);
+        }
     }
 
     remoteUrl(owner: string, repo: string): string {
@@ -188,6 +201,15 @@ export class ForgejoClient {
 
     private isNotFound(err: any): boolean {
         return axios.isAxiosError(err) && err.response?.status === 404;
+    }
+
+    private isExistingRepositoryFilesError(err: any): boolean {
+        if (!axios.isAxiosError(err)) return false;
+
+        const data = err.response?.data;
+        const message = typeof data === "string" ? data : data?.message;
+
+        return typeof message === "string" && message.includes("repository files already exist");
     }
 
     private toError(err: any, context: string): Error {
